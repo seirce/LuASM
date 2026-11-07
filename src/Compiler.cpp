@@ -1,8 +1,10 @@
 #include "Compiler.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include <lua.h>
@@ -94,7 +96,7 @@ int emitIncbin(lua_State* state)
 void registerFunction(lua_State* state, CompileContext* context, const char* name, lua_CFunction function)
 {
     lua_pushlightuserdata(state, context);
-    lua_pushcclosure(state, function, 1);
+    lua_pushcclosure(state, function, name, 1);
     lua_setglobal(state, name);
 }
 
@@ -102,7 +104,7 @@ void registerInstruction(lua_State* state, CompileContext* context, const char* 
 {
     lua_pushlightuserdata(state, context);
     lua_pushstring(state, name);
-    lua_pushcclosure(state, emitInstruction, 2);
+    lua_pushcclosure(state, emitInstruction, name, 2);
     lua_setglobal(state, name);
 }
 
