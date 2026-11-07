@@ -23,7 +23,7 @@ The executable will be produced under the build directory (the exact configurati
 ## Run
 
 ```powershell
-.`build\Release\LuASM.exe` examples\first_patch.luau
+.\build\Release\LuASM.exe examples\first_patch.luau
 ```
 
 This writes `examples\first_patch.asm` next to the input file.
