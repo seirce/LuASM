@@ -26,8 +26,12 @@ routine("AutoHealHook", function()
     cmp("#$0000")
     bne("AutoHealDone")
 
-    -- Heal Samus by exactly 1 energy.
+    -- Preserve DP_Temp12, which the vanilla healing routine uses as scratch.
+    lda("$12")
+    pha()
     Energy.heal(1)
+    pla()
+    sta("$12")
 
     -- Restore the original machine state and return to the game loop.
     label("AutoHealDone")
