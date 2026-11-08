@@ -24,12 +24,13 @@ routine("AutoHealHook", function()
     -- The game's timer resets it to zero once every 60 gameplay frames.
     lda("$09DA")
     cmp("#$0000")
-    bne("$0B")
+    bne("AutoHealDone")
 
     -- Heal Samus by exactly 1 energy.
     Energy.heal(1)
 
     -- Restore the original machine state and return to the game loop.
+    label("AutoHealDone")
     ply()
     plx()
     pla()
