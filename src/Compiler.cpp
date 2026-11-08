@@ -61,8 +61,10 @@ int emitOrg(lua_State* state)
 {
     auto* context = contextFrom(state);
     if (lua_gettop(state) != 1)
+    {
         luaL_error(state, "org() expects exactly one address string");
         return 0;
+    }
 
     context->output << "org " << luaString(state, 1) << '\n';
     return 0;
@@ -72,8 +74,10 @@ int emitLabel(lua_State* state)
 {
     auto* context = contextFrom(state);
     if (lua_gettop(state) != 1)
+    {
         luaL_error(state, "label() expects exactly one label name");
         return 0;
+    }
 
     context->output << luaString(state, 1) << ":\n";
     return 0;
@@ -83,14 +87,18 @@ int emitIncbin(lua_State* state)
 {
     auto* context = contextFrom(state);
     if (lua_gettop(state) != 1)
+    {
         luaL_error(state, "incbin() expects exactly one file path");
         return 0;
+    }
 
     const std::filesystem::path relativePath(luaString(state, 1));
     const auto resolved = (context->sourceDirectory / relativePath).lexically_normal();
     if (!std::filesystem::exists(resolved))
+    {
         luaL_error(state, "incbin file does not exist: %s", resolved.string().c_str());
         return 0;
+    }
 
     // Keep the path relative to the source file so the generated patch is portable.
     context->output << "incbin \"" << relativePath.generic_string() << "\"\n";
