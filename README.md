@@ -1,6 +1,6 @@
 # LuASM
 
-LuASM is a Luau-shaped front end for writing Super Metroid 65c816 assembly patches. It generates Asar `.asm` files; it does not patch ROMs.
+LuASM is a Luau-shaped front end for writing Super Metroid 65c816 assembly patches. It generates Asar `.asm` files; it does not patch ROMs. You can use this for other SNES games, however, you will need to write your own libraries for that.
 
 **Status: early prototype / not release-ready.** The current bootstrap embeds the Luau VM and exposes an initial set of lowercase 65c816 instruction-emitter functions, plus `org()`, `label()`, and `incbin()`.
 
