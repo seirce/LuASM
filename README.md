@@ -51,6 +51,12 @@ end)
 
 The `routine` callback runs during compilation to emit the routine body. The generated label and machine instructions are executed in-game when control flow reaches them. LuASM does not automatically add `rts()` or `rtl()`; choose the appropriate return instruction yourself.
 
+## Libraries
+
+`require("Energy")` loads `Libraries/Energy.luau` and returns the module value. Library files are compiled and executed in the same Luau VM as the input script, and each module is cached for the duration of that compilation. A require string beginning with a backslash, such as `require("\\helpers\\MyLibrary")`, instead resolves a `.luau` file relative to the directory containing the input `.luau` file. The compiler does not contain game-specific APIs; game behavior belongs in library modules.
+
+The initial `Energy` library targets the unmodified Super Metroid game. Its `current` and `max` fields are RAM address strings, while `heal()` and `damage()` emit calls to the game's built-in health routines.
+
 See [Compiler design](docs/COMPILER_DESIGN.md) for the semantics and current limitations.
 
 ## Basic instruction example
