@@ -249,7 +249,7 @@ int emitRequire(lua_State* state)
         const auto cached = context->loadedModules.find(cacheKey);
         if (cached != context->loadedModules.end())
         {
-            lua_rawgeti(state, LUA_REGISTRYINDEX, cached->second);
+            lua_getref(state, cached->second);
             return 1;
         }
 
@@ -289,9 +289,10 @@ int emitRequire(lua_State* state)
         }
 
         context->loadingModules.erase(cacheKey);
-        const int reference = luaL_ref(state, LUA_REGISTRYINDEX);
+        // Luau uses lua_ref/lua_getref rather than Lua's luaL_ref registry API.
+        // lua_ref keeps the value pinned and leaves it on the stack for return.
+        const int reference = lua_ref(state, -1);
         context->loadedModules.emplace(cacheKey, reference);
-        lua_rawgeti(state, LUA_REGISTRYINDEX, reference);
         return 1;
     }
     catch (const std::exception& error)
