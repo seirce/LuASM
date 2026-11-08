@@ -19,6 +19,7 @@ struct CompileContext
 {
     std::ostringstream output;
     std::filesystem::path sourceDirectory;
+    bool insideRoutine = false;
 };
 
 CompileContext* contextFrom(lua_State* state)
@@ -80,6 +81,52 @@ int emitLabel(lua_State* state)
     }
 
     context->output << luaString(state, 1) << ":\n";
+    return 0;
+}
+
+int emitRoutine(lua_State* state)
+{
+    auto* context = contextFrom(state);
+    if (lua_gettop(state) != 2)
+    {
+        luaL_error(state, "routine() expects a name and a function");
+        return 0;
+    }
+
+    if (lua_type(state, 2) != LUA_TFUNCTION)
+    {
+        luaL_error(state, "routine() second argument must be a function");
+        return 0;
+    }
+
+    if (context->insideRoutine)
+    {
+        luaL_error(state, "nested routine() declarations are not supported");
+        return 0;
+    }
+
+    const std::string name = luaString(state, 1);
+    if (name.empty() || name.find_first_of(" \t\r\n:") != std::string::npos)
+    {
+        luaL_error(state, "routine() name must be a non-empty Asar label without whitespace or ':'");
+        return 0;
+    }
+
+    context->output << name << ":\n";
+    context->insideRoutine = true;
+
+    lua_pushvalue(state, 2);
+    const int status = lua_pcall(state, 0, 0, 0);
+    context->insideRoutine = false;
+
+    if (status != 0)
+    {
+        const char* message = lua_tostring(state, -1);
+        const std::string errorMessage = message ? message : "unknown error";
+        luaL_error(state, "routine '%s' failed: %s", name.c_str(), errorMessage.c_str());
+        return 0;
+    }
+
     return 0;
 }
 
@@ -166,6 +213,7 @@ CompileResult Compiler::compileFile(const std::filesystem::path& inputPath)
 
         registerFunction(state.get(), &context, "org", emitOrg);
         registerFunction(state.get(), &context, "label", emitLabel);
+        registerFunction(state.get(), &context, "routine", emitRoutine);
         registerFunction(state.get(), &context, "incbin", emitIncbin);
 
         static const char* instructions[] = {
