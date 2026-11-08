@@ -15,7 +15,7 @@ set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     Luau
     GIT_REPOSITORY https://github.com/luau-lang/luau.git
-    GIT_TAG master
+    GIT_TAG 12a6ba75883272c79b66b59815efef4c574196f6
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(Luau)
