@@ -112,7 +112,11 @@ int emitRoutine(lua_State* state)
     const std::string name = luaString(state, 1);
     if (name.empty() || name.find_first_of(" \\t\\r\\n:") != std::string::npos)
     {
-        luaL_error(state, "routine() name must be a non-empty Asar label without whitespace or ':'");
+        luaL_error(
+            state,
+            "routine() received invalid name '%s' (length %d); names must be non-empty Asar labels without whitespace or ':'",
+            name.c_str(),
+            static_cast<int>(name.size()));
         return 0;
     }
 
