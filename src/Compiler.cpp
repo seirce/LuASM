@@ -110,7 +110,7 @@ int emitRoutine(lua_State* state)
     }
 
     const std::string name = luaString(state, 1);
-    if (name.empty() || name.find_first_of(" \\t\\r\\n:") != std::string::npos)
+    if (name.empty() || name.find_first_of(" \t\r\n:") != std::string::npos)
     {
         luaL_error(
             state,
