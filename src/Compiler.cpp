@@ -205,6 +205,8 @@ std::filesystem::path findLibraryFile(const CompileContext& context, const std::
                              "' (looked for Libraries/" + modulePath.generic_string() + ")");
 }
 
+std::string readFile(const std::filesystem::path& path);
+
 std::filesystem::path resolveModulePath(const CompileContext& context, const std::string& moduleName)
 {
     if (moduleName.empty())
