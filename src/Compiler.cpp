@@ -5,6 +5,8 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <lua.h>
@@ -20,6 +22,8 @@ struct CompileContext
     std::ostringstream output;
     std::filesystem::path sourceDirectory;
     bool insideRoutine = false;
+    std::unordered_map<std::string, int> loadedModules;
+    std::unordered_set<std::string> loadingModules;
 };
 
 CompileContext* contextFrom(lua_State* state)
@@ -106,7 +110,7 @@ int emitRoutine(lua_State* state)
     }
 
     const std::string name = luaString(state, 1);
-    if (name.empty() || name.find_first_of(" \t\r\n:") != std::string::npos)
+    if (name.empty() || name.find_first_of(" \\t\\r\\n:") != std::string::npos)
     {
         luaL_error(state, "routine() name must be a non-empty Asar label without whitespace or ':'");
         return 0;
@@ -152,6 +156,149 @@ int emitIncbin(lua_State* state)
     return 0;
 }
 
+std::filesystem::path withLuauExtension(std::filesystem::path path)
+{
+    if (path.extension().empty())
+        path += ".luau";
+    return path;
+}
+
+bool isRegularFile(const std::filesystem::path& path)
+{
+    std::error_code error;
+    return std::filesystem::is_regular_file(path, error);
+}
+
+std::filesystem::path findLibraryFile(const CompileContext& context, const std::string& moduleName)
+{
+    const std::filesystem::path modulePath = withLuauExtension(moduleName);
+
+    // Search upward from the source file, so scripts in subdirectories can use
+    // the repository's top-level Libraries directory.
+    for (auto directory = context.sourceDirectory; !directory.empty();)
+    {
+        const auto candidate = directory / "Libraries" / modulePath;
+        if (isRegularFile(candidate))
+            return std::filesystem::absolute(candidate).lexically_normal();
+
+        const auto parent = directory.parent_path();
+        if (parent == directory)
+            break;
+        directory = parent;
+    }
+
+    // Also support running LuASM with its working directory inside the
+    // installation/project tree.
+    for (auto directory = std::filesystem::current_path(); !directory.empty();)
+    {
+        const auto candidate = directory / "Libraries" / modulePath;
+        if (isRegularFile(candidate))
+            return std::filesystem::absolute(candidate).lexically_normal();
+
+        const auto parent = directory.parent_path();
+        if (parent == directory)
+            break;
+        directory = parent;
+    }
+
+    throw std::runtime_error("could not find library '" + moduleName +
+                             "' (looked for Libraries/" + modulePath.generic_string() + ")");
+}
+
+std::filesystem::path resolveModulePath(const CompileContext& context, const std::string& moduleName)
+{
+    if (moduleName.empty())
+        throw std::runtime_error("require() module name cannot be empty");
+
+    // A leading backslash marks a path relative to the source .luau file.
+    if (moduleName.front() == '\\')
+    {
+        if (moduleName.size() == 1)
+            throw std::runtime_error("require() explicit path cannot be empty");
+
+        auto relativePath = withLuauExtension(moduleName.substr(1));
+        return std::filesystem::absolute(context.sourceDirectory / relativePath).lexically_normal();
+    }
+
+    // Bare module names are resolved only through the shared Libraries folder.
+    if (moduleName.find_first_of("/\\\\:") != std::string::npos)
+        throw std::runtime_error("require() paths must start with '\\\\'; otherwise provide a library name");
+
+    return findLibraryFile(context, moduleName);
+}
+
+int emitRequire(lua_State* state)
+{
+    auto* context = contextFrom(state);
+    if (lua_gettop(state) != 1 || lua_type(state, 1) != LUA_TSTRING)
+    {
+        luaL_error(state, "require() expects exactly one string module name");
+        return 0;
+    }
+
+    try
+    {
+        size_t length = 0;
+        const char* value = lua_tolstring(state, 1, &length);
+        const std::string moduleName(value, length);
+        const auto modulePath = resolveModulePath(*context, moduleName);
+        const std::string cacheKey = modulePath.generic_string();
+
+        const auto cached = context->loadedModules.find(cacheKey);
+        if (cached != context->loadedModules.end())
+        {
+            lua_rawgeti(state, LUA_REGISTRYINDEX, cached->second);
+            return 1;
+        }
+
+        if (context->loadingModules.find(cacheKey) != context->loadingModules.end())
+            throw std::runtime_error("circular require detected for '" + moduleName + "'");
+
+        context->loadingModules.insert(cacheKey);
+        const std::string source = readFile(modulePath);
+
+        size_t bytecodeSize = 0;
+        char* bytecode = luau_compile(source.data(), source.size(), nullptr, &bytecodeSize);
+        if (!bytecode)
+        {
+            context->loadingModules.erase(cacheKey);
+            throw std::runtime_error("Luau failed to compile library: " + modulePath.string());
+        }
+
+        const int loadStatus = luau_load(state, modulePath.string().c_str(), bytecode, bytecodeSize, 0);
+        free(bytecode);
+        if (loadStatus != 0)
+        {
+            const char* message = lua_tostring(state, -1);
+            const std::string errorMessage = message ? message : "unknown bytecode loading error";
+            lua_pop(state, 1);
+            context->loadingModules.erase(cacheKey);
+            throw std::runtime_error("could not load library '" + moduleName + "': " + errorMessage);
+        }
+
+        const int runStatus = lua_pcall(state, 0, 1, 0);
+        if (runStatus != 0)
+        {
+            const char* message = lua_tostring(state, -1);
+            const std::string errorMessage = message ? message : "unknown library execution error";
+            lua_pop(state, 1);
+            context->loadingModules.erase(cacheKey);
+            throw std::runtime_error("error while running library '" + moduleName + "': " + errorMessage);
+        }
+
+        context->loadingModules.erase(cacheKey);
+        const int reference = luaL_ref(state, LUA_REGISTRYINDEX);
+        context->loadedModules.emplace(cacheKey, reference);
+        lua_rawgeti(state, LUA_REGISTRYINDEX, reference);
+        return 1;
+    }
+    catch (const std::exception& error)
+    {
+        luaL_error(state, "require() failed: %s", error.what());
+        return 0;
+    }
+}
+
 void registerFunction(lua_State* state, CompileContext* context, const char* name, lua_CFunction function)
 {
     lua_pushlightuserdata(state, context);
@@ -173,7 +320,7 @@ bool hasLoromDirective(const std::string& source)
     std::string line;
     while (std::getline(lines, line))
     {
-        const auto first = line.find_first_not_of(" \t");
+        const auto first = line.find_first_not_of(" \\t");
         if (first == std::string::npos)
             continue;
         return line.compare(first, 8, "--!lorom") == 0;
@@ -203,7 +350,7 @@ CompileResult Compiler::compileFile(const std::filesystem::path& inputPath)
         context.sourceDirectory = std::filesystem::absolute(inputPath).parent_path();
 
         if (hasLoromDirective(source))
-            context.output << "lorom\n";
+            context.output << "lorom\\n";
 
         lua_State* rawState = luaL_newstate();
         if (!rawState)
@@ -215,6 +362,7 @@ CompileResult Compiler::compileFile(const std::filesystem::path& inputPath)
         registerFunction(state.get(), &context, "label", emitLabel);
         registerFunction(state.get(), &context, "routine", emitRoutine);
         registerFunction(state.get(), &context, "incbin", emitIncbin);
+        registerFunction(state.get(), &context, "require", emitRequire);
 
         static const char* instructions[] = {
             "adc", "and", "asl", "bcc", "bcs", "beq", "bit", "bmi", "bne", "bpl",
