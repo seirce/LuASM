@@ -19,12 +19,22 @@ jobs:
         include:
           - platform: windows-x64
             runner: windows-2022
+            cmake_arch: x64
             archive: zip
             artifact: LuASM-windows-x64
+          - platform: windows-arm64
+            runner: windows-11-arm
+            cmake_arch: ARM64
+            archive: zip
+            artifact: LuASM-windows-arm64
           - platform: linux-x64
             runner: ubuntu-22.04
             archive: tar.gz
             artifact: LuASM-linux-x64
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            archive: tar.gz
+            artifact: LuASM-linux-arm64
           - platform: macos-universal
             runner: macos-15
             archive: tar.gz
@@ -38,7 +48,7 @@ jobs:
 
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -A ${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=Release
 
       - name: Configure Linux
         if: runner.os == 'Linux'
