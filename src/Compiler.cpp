@@ -357,7 +357,7 @@ CompileResult Compiler::compileFile(const std::filesystem::path& inputPath)
         context.sourceDirectory = std::filesystem::absolute(inputPath).parent_path();
 
         if (hasLoromDirective(source))
-            context.output << "lorom\\n";
+            context.output << "lorom\n";
 
         lua_State* rawState = luaL_newstate();
         if (!rawState)
