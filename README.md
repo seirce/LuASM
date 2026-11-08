@@ -77,6 +77,6 @@ nop()
 
 ## Current limitations
 
-Instruction calls currently emit mnemonic text and do not validate addressing modes. The full instruction catalogue, library loading through `require()`, runtime callbacks, richer Asar directives, and comprehensive tests remain to be implemented.
+Instruction calls currently emit mnemonic text and do not validate addressing modes. The full instruction catalogue, addressing-mode validation, runtime callbacks, richer Asar directives, and comprehensive tests remain to be implemented.
 
 Luau is built into LuASM as a dependency; a separate `luau.exe` is not required. CMake fetches Luau source during configuration, so the first configure step requires an internet connection.
