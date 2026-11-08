@@ -26,7 +26,7 @@ jobs:
             archive: tar.gz
             artifact: LuASM-linux-x64
           - platform: macos-universal
-            runner: macos-14
+            runner: macos-15
             archive: tar.gz
             artifact: LuASM-macos-universal
 
