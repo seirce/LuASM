@@ -1,82 +1,73 @@
 # LuASM
 
-LuASM is a Luau-shaped front end for writing Super Metroid 65c816 assembly patches. It generates Asar `.asm` files; it does not patch ROMs. You can use this for other SNES games, however, you will need to write your own libraries for that.
+LuASM translates Luau-shaped Super Metroid patches into 65c816 assembly. Choose `LuASM-asar` for Asar 1.91 or `LuASM-xkas` for xkas 0.06. Both write a sibling `.asm` file that you can inspect and assemble with your usual patching tools. The original `LuASM` command selects Asar.
 
-**Status: early prototype / not release-ready.** The compiler embeds Luau and currently exposes an initial set of lowercase 65c816 instruction-emitter functions, plus `org()`, `label()`, `routine()`, and `incbin()`.
+## Build and run
 
-## Build
-
-Requirements:
-- CMake 3.20 or newer
-- A C++17 compiler (Visual Studio 2022 Build Tools on Windows)
-- Git (CMake uses it to fetch the Luau source)
-
-From the repository root:
+Build with CMake 3.20 or newer and a C++17 compiler. From the repository root on Windows with Visual Studio:
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+.\build\Release\LuASM-asar.exe examples\first_patch.luau
 ```
 
-The executable will be produced under the build directory (the exact configuration subfolder depends on the generator).
+For xkas, run `.\build\Release\LuASM-xkas.exe examples\first_patch.luau`. Both commands write `examples\first_patch.asm`. With a single-configuration generator such as Ninja, the executables are directly under `build`.
 
-## Run
-
-```powershell
-.\build\Release\LuASM.exe examples\first_patch.luau
-```
-
-This writes `examples\first_patch.asm` next to the input file.
-
-## Assembly routine example
-
-Ordinary Luau functions are compile-time helpers: calling one emits its assembly instructions inline. Use `routine(name, function)` to define a named assembly routine that can be called with `jsr()` or `jsl()`:
+## Write a patch
 
 ```lua
 --!lorom
 
-org("$82F000")
-jsl("SaveGame")
-
-routine("SaveGame", function()
-    php()
-    phb()
-    lda("$09A2")
-    sta("$12")
-    plb()
-    plp()
-    rtl()
-end)
+org($84F205) -- beam block table
+function orgPLM(name)
+    dw(##name .. "PLM_Pre", $CBB7)
+end
+IcePLM = orgPLM("Ice")
+SpazerPLM = do
+    dw(#SpazerPLM_Pre, $CBB7)
+end
 ```
 
-The `routine` callback runs during compilation to emit the routine body. The generated label and machine instructions are executed in-game when control flow reaches them. LuASM does not automatically add `rts()` or `rtl()`; choose the appropriate return instruction yourself.
+Both definitions produce a label followed by an indented instruction.
 
-## Libraries
+```asm
+lorom
 
-`require("Energy")` loads `Libraries/Energy.luau` and returns the module value. Library files are compiled and executed in the same Luau VM as the input script, and each module is cached for the duration of that compilation. A require string beginning with a backslash, such as `require("\\helpers\\MyLibrary")`, instead resolves a `.luau` file relative to the directory containing the input `.luau` file. The compiler does not contain game-specific APIs; game behavior belongs in library modules.
+org $84F205 ; beam block table
+IcePLM:
+	DW #IcePLM_Pre, $CBB7
+SpazerPLM:
+	DW #SpazerPLM_Pre, $CBB7
+```
 
-The initial `Energy` library targets the unmodified Super Metroid game. Its `current` and `max` fields are RAM address strings, while `heal()` and `damage()` emit calls to the game's built-in health routines.
+A function expands wherever you call it. A plain call inserts its body inline. Assigning a call gives that expansion a label. To emit a machine-code call, write `jsr(MyLabel)` or `jsl(MyLabel)` and provide the matching return in the patch.
 
-See [Compiler design](docs/COMPILER_DESIGN.md) for the semantics and current limitations.
+Use bare assembly operands such as `lda(#$0000)`, `beq(ICEAlpha)` and `lda.w($0C2C,X)`. A single `#` keeps its assembly meaning. Inside a function, `##name` prefixes the parameter value with a literal `#`, and `..` joins the surrounding pieces. Asar 1.91 accepts `DW #Label` with a deprecation warning. To emit `DW Label`, use `dw(name .. "PLM_Pre", $CBB7)`.
 
-## Basic instruction example
+## Libraries and raw assembly
+
+In `Libraries/Beam.luau`, write the functions the patch will reference.
 
 ```lua
---!lorom
-
-org("$82E833")
-lda("$07B3")
-bit("#$0008")
-bne("$24")
-
-org("$90EA57")
-nop()
-nop()
-nop()
+function pointer(name)
+    asm
+        DW #<name>PLM_Pre, $CBB7
+    end
+end
 ```
 
-## Current limitations
+Then use the library from a patch:
 
-Instruction calls currently emit mnemonic text and do not validate addressing modes. The full instruction catalogue, addressing-mode validation, runtime callbacks, richer Asar directives, and comprehensive tests remain to be implemented.
+```lua
+beam = require("Beam")
+org($84F205)
+IcePLM = beam.pointer("Ice")
+```
 
-Luau is built into LuASM as a dependency; a separate `luau.exe` is not required. CMake fetches Luau source during configuration, so the first configure step requires an internet connection.
+Library functions can call other functions and require other libraries. A leading `local` is optional. Inside an `asm` block, LuASM removes the shared indentation margin and substitutes bound `<name>` placeholders. Write the remaining text exactly as the selected assembler expects, including capitalization, comments and spacing.
+
+Outside raw ASM, blank lines pass through and each extra dash in a comment adds a semicolon. For example, `--- pre-instructions` becomes `;; pre-instructions`.
+
+See [translation rules and target differences](docs/COMPILER_DESIGN.md) for the supported syntax.

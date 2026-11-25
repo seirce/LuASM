@@ -5,6 +5,8 @@
 
 namespace luasm
 {
+enum class Target { Asar191, Xkas006 };
+
 struct CompileResult
 {
     bool success = false;
@@ -15,6 +17,6 @@ struct CompileResult
 class Compiler
 {
 public:
-    CompileResult compileFile(const std::filesystem::path& inputPath);
+    CompileResult compileFile(const std::filesystem::path& inputPath, Target target = Target::Asar191);
 };
-} // namespace luasm
+}

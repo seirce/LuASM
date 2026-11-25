@@ -66,12 +66,15 @@ jobs:
         if: runner.os != 'Windows'
         run: cmake --build build --config Release --parallel 2
 
+      - name: Test both translators
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
-          Copy-Item build/Release/LuASM.exe package/
+          Copy-Item build/Release/LuASM*.exe package/
           Copy-Item README.md package/
           if (Test-Path examples) { Copy-Item examples package/examples -Recurse }
           Compress-Archive -Path package/* -DestinationPath "${{ matrix.artifact }}.zip"
@@ -80,7 +83,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p package
-          cp build/LuASM package/
+          cp build/LuASM build/LuASM-asar build/LuASM-xkas package/
           cp README.md package/
           if [ -d examples ]; then cp -R examples package/; fi
           tar -czf "${{ matrix.artifact }}.tar.gz" -C package .

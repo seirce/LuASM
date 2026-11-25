@@ -1,15 +1,5 @@
-# Tests
+# Translation tests
 
-Compiler regression tests will live here.
+After building, run `ctest --test-dir build -C Release --output-on-failure`.
 
-The initial smoke test should compile `examples/first_patch.luau` and verify that the generated assembly contains:
-
-```asm
-lorom
-org "$82E833"
-lda $07B3
-bit #$0008
-bne $24
-```
-
-The exact Asar formatting may be refined as the emitter and golden-file tests are implemented.
+The suite translates a beam-block table through both command-line tools and compares the output bytes, including indentation, comments, blank lines and line endings. It creates temporary nested libraries in the build tree, checks target-specific include syntax, and verifies that a failed translation preserves the last generated patch.
