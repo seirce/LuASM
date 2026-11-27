@@ -19,7 +19,8 @@ using Names = std::map<std::string, std::string>;
 
 struct Scope
 {
-    Names values, imports;
+    Names values;
+    std::map<std::string, LibraryRef> imports;
     std::set<std::string> parameters;
 };
 
@@ -55,27 +56,77 @@ std::string withoutMargin(const std::string& text, const std::string& margin)
     return text.compare(0, margin.size(), margin) == 0 ? text.substr(margin.size()) : text;
 }
 
-fs::path libraryPath(const fs::path& from, std::string name)
+// Read only the first line of each candidate. Template bodies are still loaded on demand.
+class BankLibraries
 {
-    if (name.empty()) throw Error("empty library name");
-    const bool relative = name.front() == '\\';
-    if (relative) name.erase(0, 1);
-    else if (name.find_first_of("/\\:") != std::string::npos)
-        throw Error("explicit library paths must start with a backslash");
-    std::replace(name.begin(), name.end(), '\\', '/');
-    fs::path file(name);
-    if (file.empty() || file.has_root_path()) throw Error("expected a relative library path");
-    if (!file.has_extension()) file += ".luau";
-    if (relative) return fs::canonical(from.parent_path() / file);
-    for (auto dir : {from.parent_path(), fs::current_path()})
+    using Index = std::map<std::string, std::vector<fs::path>>;
+    std::map<fs::path, Index> directories;
+
+public:
+    fs::path find(const fs::path& directory, const std::string& bank)
     {
-        for (;; dir = dir.parent_path())
+        if (!fs::is_directory(directory)) return {};
+        auto [it, fresh] = directories.try_emplace(fs::canonical(directory));
+        auto& index = it->second;
+        if (fresh)
         {
-            auto candidate = dir / "Libraries" / file;
-            if (fs::is_regular_file(candidate)) return fs::canonical(candidate);
+            for (const auto& entry : fs::directory_iterator(it->first))
+            {
+                if (lower(entry.path().extension().string()) != ".luau" || !entry.is_regular_file()) continue;
+                std::ifstream input(entry.path(), std::ios::binary);
+                if (!input) throw Error("could not read library header in " + entry.path().string());
+                std::string line;
+                std::getline(input, line);
+                if (input.bad()) throw Error("could not read library header in " + entry.path().string());
+                const auto declared = bankHeader(line);
+                if (!declared.empty()) index[declared].push_back(entry.path());
+            }
+        }
+        const auto match = index.find(bank);
+        if (match == index.end()) return {};
+        const auto& files = match->second;
+        if (files.size() > 1)
+            throw Error("multiple libraries declare bank " + bank + ": " +
+                        files[0].string() + " and " + files[1].string());
+        return fs::canonical(files.front());
+    }
+};
+
+fs::path libraryPath(const fs::path& from, const fs::path& mainFile, const fs::path& toolDir,
+                     const LibraryRef& library, BankLibraries& banks)
+{
+    std::string name = library.name;
+    if (name.empty()) throw Error("empty library name");
+    const bool hasDirectory = name.find_first_of("/\\") != std::string::npos;
+    const bool legacyRelative = name.front() == '\\';
+    std::replace(name.begin(), name.end(), '\\', '/');
+    if (name.front() == '/') name.erase(0, 1);
+    fs::path file(name);
+    if (!file.has_filename() || file.has_root_path() || name.find(':') != std::string::npos ||
+        file.filename() == "." || file.filename() == "..")
+        throw Error("expected a library name or a script-relative library path");
+    if (!file.has_extension()) file += ".luau";
+    if (hasDirectory)
+    {
+        const auto path = (legacyRelative ? from : mainFile).parent_path() / file;
+        if (!fs::is_regular_file(path)) throw Error("could not find library " + path.generic_string());
+        return fs::canonical(path);
+    }
+    for (auto dir : {from.parent_path(), mainFile.parent_path(), fs::current_path(), toolDir})
+    {
+        for (; !dir.empty(); dir = dir.parent_path())
+        {
+            const auto folder = dir / "Libraries";
+            if (library.byBank)
+            {
+                auto candidate = banks.find(folder, name);
+                if (!candidate.empty()) return candidate;
+            }
+            else if (fs::is_regular_file(folder / file)) return fs::canonical(folder / file);
             if (dir == dir.parent_path()) break;
         }
     }
+    if (library.byBank) throw Error("could not find a library for bank " + name);
     throw Error("could not find Libraries/" + file.generic_string());
 }
 
@@ -108,7 +159,12 @@ std::string expression(const std::string& source, const Scope& scope)
             {
                 size_t pos = static_cast<size_t>(it->position());
                 result += part.substr(last, pos - last);
-                auto found = scope.values.find(it->str());
+                auto key = it->str();
+                // $FACE stays a hex literal even when a template has a parameter named FACE.
+                if (key.front() == '$' && key.find_first_not_of("0123456789ABCDEFabcdef", 1) != std::string::npos &&
+                    scope.parameters.count(key.substr(1)))
+                    key.erase(0, 1);
+                auto found = scope.values.find(key);
                 const bool afterDigit = pos && std::isdigit(static_cast<unsigned char>(part[pos - 1]));
                 result += found == scope.values.end() || afterDigit ? it->str() : found->second;
                 last = pos + it->length();
@@ -139,6 +195,8 @@ class Translation
 {
     Target target;
     fs::path mainFile;
+    fs::path toolDir;
+    BankLibraries banks;
     std::map<fs::path, Unit> units;
     std::vector<const Statement*> active;
     std::vector<std::string> lines;
@@ -252,7 +310,7 @@ class Translation
         bool imported = dot != std::string::npos && alias != scope.imports.end();
         if (imported)
         {
-            owner = &load(libraryPath(caller.module.path, alias->second));
+            owner = &load(libraryPath(caller.module.path, mainFile, toolDir, alias->second, banks));
             name.erase(0, dot + 1);
             if (!owner->module.exports.empty()) name = owner->module.exports + "." + name;
         }
@@ -309,7 +367,7 @@ class Translation
                 case Kind::Function: case Kind::Table: case Kind::Export:
                     break;
                 case Kind::Value: scope.values[n.name] = expression(n.value, scope); break;
-                case Kind::Import: scope.imports[n.name] = n.value; break;
+                case Kind::Import: scope.imports[n.name] = n.library; break;
                 case Kind::Mapping: instruction({n.value, {}}, {}, indent); break;
                 case Kind::Assembly:
                     if (!n.comment.empty()) lines.push_back(indent);
@@ -340,7 +398,8 @@ class Translation
     }
 
 public:
-    Translation(Target selected, fs::path path) : target(selected), mainFile(std::move(path)) {}
+    Translation(Target selected, fs::path path, const fs::path& directory)
+        : target(selected), mainFile(std::move(path)), toolDir(directory) {}
 
     std::string run()
     {
@@ -387,7 +446,7 @@ void writePatch(const fs::path& output, const std::string& text)
 }
 }
 
-CompileResult Compiler::compileFile(const fs::path& inputPath, Target target)
+CompileResult Compiler::compileFile(const fs::path& inputPath, Target target, const fs::path& toolDir)
 {
     CompileResult result;
     try
@@ -396,7 +455,7 @@ CompileResult Compiler::compileFile(const fs::path& inputPath, Target target)
         output.replace_extension(".asm");
         if (fs::exists(output) && fs::equivalent(inputPath, output))
             throw Error("input and output refer to the same file");
-        const auto text = Translation(target, fs::canonical(inputPath)).run();
+        const auto text = Translation(target, fs::canonical(inputPath), toolDir).run();
         writePatch(output, text);
         result.outputPath = output;
         result.success = true;

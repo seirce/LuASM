@@ -13,7 +13,13 @@ LuASM reads one statement per line. The translator indexes function declarations
 
 ## Library lookup
 
-`beam = require("Beam Blocks")` associates the alias with a file named `Libraries/Beam Blocks.luau`. Lookup walks upward from the importing file, then from the working directory. An explicit path such as `require("\\\\helpers\\\\Beam")` is relative to the importing file. The extension is optional.
+A library can declare its bank on the first line with `--!bank $85`. Use an unquoted bank byte in `require($85)`. Both forms accept two hex digits from `$00` through `$FF`, case-insensitively. Bank imports search the same `Libraries` directories in the same order as bare names. The first folder containing a match supplies the library. Two files declaring the requested bank in that folder produce an error identifying both files. The directive contributes no ASM.
+
+`beam = require("Beam Blocks")` associates the alias with `Libraries/Beam Blocks.luau`. For bare names, LuASM looks for that file under `Libraries` while walking up from the importing file, the entry patch, the working directory and finally the translator executable. A packaged copy includes a `Libraries` folder beside the executables.
+
+`require("/helpers/Beam")` and `require("helpers/Beam.luau")` both select `helpers/Beam.luau` relative to the entry patch's directory. This base stays the same inside nested imports. The older leading-backslash form, `require("\\helpers\\Beam")`, retains its importing-file-relative behavior.
+
+Inside a template, `$data` substitutes the complete operand supplied for the parameter `data`. Passing `$0001` gives `$0001`. Hex literals such as `$FACE` retain their numeric meaning. Use the bare parameter name if its spelling consists entirely of hex digits.
 
 The first call through an alias loads and indexes that library. Only the called function bodies contribute ASM. Each nested call resolves imports in the file that defines the function. Libraries can expose plain functions or use the table form `local T = {}`, `function T.pointer(name)`, and `return T`.
 

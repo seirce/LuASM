@@ -1,6 +1,7 @@
 #include "Syntax.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <regex>
 
@@ -36,6 +37,15 @@ size_t quoteEnd(const std::string& text, size_t start)
 }
 
 bool isQuote(char c) { return c == '"' || c == '\''; }
+
+std::string bankNumber(std::string text)
+{
+    if (text.size() != 3 || text.front() != '$' ||
+        text.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+        return {};
+    for (char& c : text) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return text;
+}
 
 void parseLine(Statement& node, std::string code)
 {
@@ -98,8 +108,14 @@ void classify(Statement& node)
         if (node.call.name == "require")
         {
             if (node.name.empty() || node.call.args.size() != 1)
-                throw Error("expected an alias = require(\"Library Name\")");
-            code = quotedValue(node.call.args.front());
+                throw Error("expected an alias = require(\"Library Name\") or require($85)");
+            const auto& arg = node.call.args.front();
+            if (isQuote(arg.front())) node.library.name = quotedValue(arg);
+            else
+            {
+                node.library = {bankNumber(arg), true};
+                if (node.library.name.empty()) throw Error("expected a quoted library name or a bank from $00 to $FF");
+            }
             node.kind = Kind::Import;
         }
         return;
@@ -126,6 +142,12 @@ public:
             const auto stripped = trim(line);
             const auto mappingEnd = stripped.find_first_of(" \t");
             const auto mapping = stripped.substr(0, mappingEnd);
+            if (mapping == "--!bank")
+            {
+                if (node.line != 1) throw Error("--!bank must be on the first line");
+                if (bankHeader(line).empty()) throw Error("expected --!bank followed by a bank from $00 to $FF");
+                continue;
+            }
             if (mapping == "--!lorom" || mapping == "--!hirom" || mapping == "--!sa1rom" ||
                 mapping == "--!exhirom" || mapping == "--!header")
             {
@@ -185,6 +207,16 @@ std::string trim(const std::string& text)
 }
 
 bool identifier(const std::string& text) { return std::regex_match(text, idPattern); }
+
+std::string bankHeader(const std::string& firstLine)
+{
+    const auto start = firstLine.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
+    const auto text = trim(firstLine.substr(start));
+    const auto space = text.find_first_of(" \t");
+    if (space == std::string::npos || text.substr(0, space) != "--!bank") return {};
+    const auto comment = text.find("--", space);
+    return bankNumber(trim(text.substr(space, comment - space)));
+}
 
 std::string quotedValue(const std::string& text)
 {
@@ -255,7 +287,7 @@ void readModule(Module& module)
     for (const auto& node : module.statements)
     {
         if (node.kind == Kind::Export) module.exports = node.name;
-        if (node.kind == Kind::Import) module.imports[node.name] = node.value;
+        if (node.kind == Kind::Import) module.imports[node.name] = node.library;
         if (node.kind == Kind::Function && !module.functions.emplace(node.name, &node).second)
             throw Error(module.path.string() + ":" + std::to_string(node.line) + ": duplicate template " + node.name);
     }

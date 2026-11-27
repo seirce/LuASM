@@ -8,7 +8,33 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
+
+namespace
+{
+std::filesystem::path toolDirectory(const char* invocation)
+{
+    namespace fs = std::filesystem;
+    fs::path executable = invocation;
+    std::error_code error;
+#ifdef _WIN32
+    std::wstring buffer(32768, L'\0');
+    const auto length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length && length < buffer.size()) executable = buffer.substr(0, length);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) executable = buffer.c_str();
+#elif defined(__linux__)
+    const auto path = fs::read_symlink("/proc/self/exe", error);
+    if (!error) executable = path;
+#endif
+    return fs::canonical(executable, error).parent_path();
+}
+}
 
 int main(int argc, char* argv[])
 {
@@ -24,7 +50,7 @@ int main(int argc, char* argv[])
 #else
     constexpr auto target = luasm::Target::Asar191;
 #endif
-    const auto result = compiler.compileFile(argv[1], target);
+    const auto result = compiler.compileFile(argv[1], target, toolDirectory(argv[0]));
 
     if (!result.success)
     {

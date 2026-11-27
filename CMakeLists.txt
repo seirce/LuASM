@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(LuASM VERSION 0.2.0 LANGUAGES CXX)
+project(LuASM VERSION 1.0.1 LANGUAGES CXX)
 
 add_library(translation STATIC src/Compiler.cpp src/Syntax.cpp)
 target_compile_features(translation PUBLIC cxx_std_17)

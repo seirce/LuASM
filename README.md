@@ -10,10 +10,10 @@ Build with CMake 3.20 or newer and a C++17 compiler. From the repository root on
 cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-.\build\Release\LuASM-asar.exe examples\first_patch.luau
+.\build\Release\LuASM-asar.exe examples\test.luau
 ```
 
-For xkas, run `.\build\Release\LuASM-xkas.exe examples\first_patch.luau`. Both commands write `examples\first_patch.asm`. With a single-configuration generator such as Ninja, the executables are directly under `build`.
+For xkas, run `.\build\Release\LuASM-xkas.exe examples\test.luau`. Both commands generate `examples\test.asm`. With a single-configuration generator such as Ninja, the executables are directly under `build`.
 
 ## Write a patch
 
@@ -48,23 +48,25 @@ Use bare assembly operands such as `lda(#$0000)`, `beq(ICEAlpha)` and `lda.w($0C
 
 ## Libraries and raw assembly
 
-In `Libraries/Beam.luau`, write the functions the patch will reference.
+To associate a library with a SNES bank, put `--!bank $85` on the first line of its `.luau` file in `Libraries`. A patch can then use `messageBoxes = require($85)` and call its functions through `messageBoxes`. The same library is also available by filename.
+
+Put reusable functions in a file under `Libraries`. For example, `Libraries/TestLibrary.luau` could contain:
 
 ```lua
-function pointer(name)
-    asm
-        DW #<name>PLM_Pre, $CBB7
-    end
+function test(address, data)
+    org(address)
+    dw($data)
 end
 ```
 
 Then use the library from a patch:
 
 ```lua
-beam = require("Beam")
-org($84F205)
-IcePLM = beam.pointer("Ice")
+lib = require("TestLibrary")
+lib.test($84F245, $0001)
 ```
+
+This emits `org $84F245` followed by `DW $0001`. Both `data` and `$data` insert the supplied operand with its original prefix and width. For a library stored alongside your patch in a subfolder, use `require("/helpers/TestLibrary")`. The leading slash refers to the folder containing the patch you passed to LuASM, including when a library requires another library.
 
 Library functions can call other functions and require other libraries. A leading `local` is optional. Inside an `asm` block, LuASM removes the shared indentation margin and substitutes bound `<name>` placeholders. Write the remaining text exactly as the selected assembler expects, including capitalization, comments and spacing.
 
